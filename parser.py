@@ -1,6 +1,12 @@
 from bs4 import BeautifulSoup
 import os, pickle
 
+class MyExceptin(Exception):
+    def __init__(self,str):
+        self.str = str
+    def __str__(self):
+        print("该情况暂未处理:"+self.str)
+
 def save_pkl(path, data):
     with open(path, 'wb') as f:
         pickle.dump(data, f)
@@ -38,25 +44,18 @@ def file_parser(path, api2desc):
         bs = BeautifulSoup(html_doc, "html.parser")
         pack_name = bs.find('div', attrs={'class': 'header'})
         pack_name = pack_name.find('a', attrs={'href': 'package-summary.html'}).get_text()
-        class_name = bs.find('h1', attrs={'class': 'title'}).get_text().split()[1]
-        # pack_name = bs.find('div', attrs={'class': 'header'})
-        # pack_name = pack_name.find('a', attrs={'href': f'{class_name}.html'}).get_text()
-        # paths = path.split('\\')
-        # paths_len = len(paths)
-        # paths[paths_len - 1] = paths[paths_len - 1].strip('.html')
-        # pack_name = paths[3]
-        # for i in range(4, len(paths)):
-        #     pack_name = f'{pack_name}.{paths[i]}'
+        # undo 删除如List<E>中的<E>
+        class_name = bs.find('h1', attrs={'class': 'title'}).get_text().split()[1].split('<')[0]
 
-        init_api_name = f'{pack_name}.{class_name}'
-        # class_desc = bs.find('section', attrs={'class': 'description'}).find("div", attrs={'class': 'block'}).get_text()
-        # init_api_name = pack_name
-        # print('--------------------------------------------')
-        # print(init_api_name)
-        # print(class_desc)
         meth_api_names = list()
-        api2desc[init_api_name] = meth_api_names
+        if api2desc.__contains__(pack_name):
+            api2desc[pack_name][class_name] = meth_api_names
+        else:
+            class_apis = dict()
+            class_apis[class_name] = meth_api_names
+            api2desc[pack_name] = class_apis
         # print('--------------------------------------------')
+        # undo 没有收录继承方法
         meth_detail = bs.find("section", attrs={'class': 'method-details'})
         for item in meth_detail.find_all("section", attrs={'class': 'detail'}):
             meth_name_attrs = item['id'].strip(')').split('(')
@@ -65,8 +64,9 @@ def file_parser(path, api2desc):
             else:
                 meth_attrs = None
             meth_name = item.h3.get_text()
-            # 代办：需要得到返回值类所在的包
-            return_type = item.find("span", attrs={'class': 'return-type'}).get_text()
+            # undo 出去所有<>,如['lines', '', 'Stream<String>']
+            return_type = item.find("span", attrs={'class': 'return-type'}).get_text().split('<')[0]
+
             meth_api_name = [meth_name, meth_attrs, return_type]
             meth_api_names.append(meth_api_name)
             # meth_desc = item.find("div", attrs={'class': 'block'}).get_text()
@@ -74,10 +74,51 @@ def file_parser(path, api2desc):
             # print(meth_desc)
             # api2desc[meth_api_name] = meth_desc
             # print('--------------------------------------------')
-    except AttributeError as e:
+        meth_inherited = bs.find("section", attrs={'class': 'method-summary'}).findAll("div", attrs={'inherited-list'})
+        iter_num = 0
+        # if class_name == 'FileWriter':
+        #     print("FileWrite")
+        # items = meth_inherited.findAll('code')
+        for item in meth_inherited:
+            item = item.code
+            # meth_name_attrs_list = item.a['href'].strip(')').split('(')
+            meth_name_attrs_list = item.findAll('a')
+
+            for meth_name_attrs in meth_name_attrs_list:
+                meth_name_attrs = meth_name_attrs['href'].strip(')').split('(')
+                if len(meth_name_attrs) > 1:
+                    meth_attrs = meth_name_attrs[1]
+                    if '%5B%5D' in meth_attrs:
+                        meth_attrs = meth_attrs.replace('%5B%5D', '[]')
+                else:
+                    meth_attrs = None
+                meth_name = meth_name_attrs[0].split('#')[1]
+                return_type = 'Undefined'
+                meth_api_name = [meth_name, meth_attrs, return_type]
+                if (iter_num == 0) or (meth_api_name not in meth_api_names):
+                    meth_api_names.append(meth_api_name)
+            iter_num += 1
+    except AttributeError:
+        pass
+    except TypeError:
         pass
     return api2desc
 
+def get_class_pack_dict(api2desc):
+    class_pack_dict = dict()
+    for pack_name in api2desc.keys():
+        classes = api2desc.get(pack_name)
+        for class_name in classes.keys():
+            try:
+                if class_pack_dict.__contains__(class_name):
+                    # undo classneme作为key可能出现重复
+                    raise MyExceptin(f'该{class_name}类已出现过')
+                else:
+                    class_pack_dict[class_name] = pack_name
+            except MyExceptin as e:
+                print(e.str)
+                pass
+    return class_pack_dict
 
 
 if __name__ == '__main__':
@@ -88,10 +129,17 @@ if __name__ == '__main__':
         print('{}/{}: len(api2desc)={}'.format(i+1, len(files), len(api2desc)), end='\r')
         if i>30:
             api2desc = file_parser(file, api2desc)
-    c = 0
-    # for k, v in api2desc.items():
-    #     if len(v) == 0:
-    #         c += 1
+    class_pack_dict = get_class_pack_dict(api2desc)
+    java_type = ['byte[]', 'char', 'short', 'int', 'long', 'float', 'double', 'boolean', 'void']
+    for i in api2desc.values():
+        for j in i.values():
+            for k in j:
+                try:
+                    # undo：需要得到返回值类所在的包
+                    if k[2] not in java_type:
+                        k[2] = f'{class_pack_dict.get(k[2])}.{k[2]}'
+                except MyExceptin as e:
+                    print(f'{k[2]}没在class_pack_dict中')
     print(api2desc)
     # print(c, len(api2desc))
     # save_pkl('../../AST_parse/api2desc.pkl', api2desc)
