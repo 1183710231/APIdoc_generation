@@ -46,7 +46,8 @@ def file_parser(path, api2desc):
         pack_name = pack_name.find('a', attrs={'href': 'package-summary.html'}).get_text()
         # undo 删除如List<E>中的<E>
         class_name = bs.find('h1', attrs={'class': 'title'}).get_text().split()[1].split('<')[0]
-
+        if class_name == 'FileWriter':
+            print("FileWrite")
         meth_api_names = list()
         if api2desc.__contains__(pack_name):
             api2desc[pack_name][class_name] = meth_api_names
@@ -57,23 +58,24 @@ def file_parser(path, api2desc):
         # print('--------------------------------------------')
         # undo 没有收录继承方法
         meth_detail = bs.find("section", attrs={'class': 'method-details'})
-        for item in meth_detail.find_all("section", attrs={'class': 'detail'}):
-            meth_name_attrs = item['id'].strip(')').split('(')
-            if len(meth_name_attrs) > 1:
-                meth_attrs = meth_name_attrs[1]
-            else:
-                meth_attrs = None
-            meth_name = item.h3.get_text()
-            # undo 出去所有<>,如['lines', '', 'Stream<String>']
-            return_type = item.find("span", attrs={'class': 'return-type'}).get_text().split('<')[0]
+        if meth_detail:
+            for item in meth_detail.find_all("section", attrs={'class': 'detail'}):
+                meth_name_attrs = item['id'].strip(')').split('(')
+                if len(meth_name_attrs) > 1:
+                    meth_attrs = meth_name_attrs[1]
+                else:
+                    meth_attrs = None
+                meth_name = item.h3.get_text()
+                # undo 出去所有<>,如['lines', '', 'Stream<String>']
+                return_type = item.find("span", attrs={'class': 'return-type'}).get_text().split('<')[0]
 
-            meth_api_name = [meth_name, meth_attrs, return_type]
-            meth_api_names.append(meth_api_name)
-            # meth_desc = item.find("div", attrs={'class': 'block'}).get_text()
-            # print(meth_api_name)
-            # print(meth_desc)
-            # api2desc[meth_api_name] = meth_desc
-            # print('--------------------------------------------')
+                meth_api_name = [meth_name, meth_attrs, return_type]
+                meth_api_names.append(meth_api_name)
+                # meth_desc = item.find("div", attrs={'class': 'block'}).get_text()
+                # print(meth_api_name)
+                # print(meth_desc)
+                # api2desc[meth_api_name] = meth_desc
+                # print('--------------------------------------------')
         meth_inherited = bs.find("section", attrs={'class': 'method-summary'}).findAll("div", attrs={'inherited-list'})
         iter_num = 0
         # if class_name == 'FileWriter':
@@ -145,4 +147,5 @@ if __name__ == '__main__':
     # save_pkl('../../AST_parse/api2desc.pkl', api2desc)
     save_pkl('./api2desc.pkl', api2desc)
     print('nice')
+#     eclipse支持的java开发插件需要吗
 
