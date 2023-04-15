@@ -46,8 +46,8 @@ def file_parser(path, api2desc):
         pack_name = pack_name.find('a', attrs={'href': 'package-summary.html'}).get_text()
         # undo 删除如List<E>中的<E>
         class_name = bs.find('h1', attrs={'class': 'title'}).get_text().split()[1].split('<')[0]
-        # if class_name == 'FileWriter':
-        #     print("FileWrite")
+        # if class_name == 'List':
+        #     print("List")
         meth_api_names = list()
         if api2desc.__contains__(pack_name):
             api2desc[pack_name][class_name] = meth_api_names
@@ -68,7 +68,10 @@ def file_parser(path, api2desc):
                 meth_name = item.h3.get_text()
                 # undo 出去所有<>,如['lines', '', 'Stream<String>']
                 return_type = item.find("span", attrs={'class': 'return-type'}).get_text().split('<')[0]
-                modifiers = item.find("span", attrs={'class': 'modifiers'}).get_text()
+                try:
+                    modifiers = item.find("span", attrs={'class': 'modifiers'}).get_text()
+                except AttributeError:
+                    modifiers = 'public'
                 meth_api_name = [meth_name, meth_attrs, return_type, modifiers]
                 meth_api_names.append(meth_api_name)
                 # meth_desc = item.find("div", attrs={'class': 'block'}).get_text()
