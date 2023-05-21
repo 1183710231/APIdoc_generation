@@ -39,6 +39,7 @@ def legal_file(file_name):
 
 def file_parser(path, api2desc):
     try:
+        package_class_dict = dict()
         with open(path, 'r', encoding='utf-8') as f:
             html_doc = f.read()
         bs = BeautifulSoup(html_doc, "html.parser")
@@ -46,6 +47,7 @@ def file_parser(path, api2desc):
         pack_name = pack_name.find('a', attrs={'href': 'package-summary.html'}).get_text()
         # undo 删除如List<E>中的<E>
         class_name = bs.find('h1', attrs={'class': 'title'}).get_text().split()[1].split('<')[0]
+
         # if class_name == 'List':
         #     print("List")
         meth_api_names = list()
@@ -55,6 +57,35 @@ def file_parser(path, api2desc):
             class_apis = dict()
             class_apis[class_name] = meth_api_names
             api2desc[pack_name] = class_apis
+        constructor_summary = bs.find("section", attrs={'class': 'constructor-summary'})
+        if constructor_summary:
+            for item in constructor_summary.find_all("div", attrs={'class': 'col-constructor-name even-row-color'}):
+                # params = item.find("span", attrs={'class': 'member-name-link'}).get_text()
+                # params = item.code.find('a')['href']
+                meth_name_attrs = item.code.find('a')['href'].strip(')').split('(')
+                if len(meth_name_attrs) > 2:
+                    print(2)
+                if len(meth_name_attrs) > 1:
+                    meth_attrs = meth_name_attrs[1]
+                    if '%5B%5D' in meth_attrs:
+                        meth_attrs = meth_attrs.replace('%5B%5D', '[]')
+                else:
+                    meth_attrs = None
+                meth_api_names.append([class_name, meth_attrs, None, 'public'])
+            for item in constructor_summary.find_all("div", attrs={'class': 'col-constructor-name odd-row-color'}):
+                # params = item.find("span", attrs={'class': 'member-name-link'}).get_text()
+                # params = item.code.find('a')['href']
+                meth_name_attrs = item.code.find('a')['href'].strip(')').split('(')
+                if len(meth_name_attrs) > 2:
+                    print(2)
+                if len(meth_name_attrs) > 1:
+                    meth_attrs = meth_name_attrs[1]
+                    if '%5B%5D' in meth_attrs:
+                        meth_attrs = meth_attrs.replace('%5B%5D', '[]')
+                else:
+                    meth_attrs = None
+                meth_api_names.append([class_name, meth_attrs, None, 'public'])
+
         # print('--------------------------------------------')
         # undo 没有收录继承方法
         meth_detail = bs.find("section", attrs={'class': 'method-details'})
@@ -103,14 +134,25 @@ def file_parser(path, api2desc):
                 if (iter_num == 0) or (meth_api_name not in meth_api_names):
                     meth_api_names.append(meth_api_name)
             iter_num += 1
+        # //新增，为了构建structure文件
+        if package_class_dict.__contains__(pack_name):
+            package_class_dict[pack_name] = dict()
+        class_interface = bs.find("meta", attrs={'name': 'keywords'})['content'].split()[-1]
+        package_class_dict[pack_name][class_name] = [meth_api_names, path.replace('\\', '/'), class_interface]
     except AttributeError:
         pass
     except TypeError:
         pass
-    return api2desc
+    return api2desc, package_class_dict
 
 def get_class_pack_dict(api2desc):
     class_pack_dict = dict()
+
+    def get_pack_name(package_class_name):
+        class_name = package_class_name.split('.')[-1]
+        package_name = package_class_name.rstrip(class_name).rstrip('.')
+        return class_name, package_name
+
     for pack_name in api2desc.keys():
         classes = api2desc.get(pack_name)
         for class_name in classes.keys():
@@ -125,15 +167,96 @@ def get_class_pack_dict(api2desc):
                 pass
     return class_pack_dict
 
+    def get_structure(package_class_dict):
+        project_structure_dict = dict()
+        basic_type = ['byte[]', 'char', 'short', 'int', 'long', 'float', 'double', 'boolean', 'void', 'char[]']
+
+        def get_method(package_name, class_name, package_project, package_path):
+            for method in package_class_dict.get(package_name).get(class_name):
+                # 构造器
+                if method[0] == class_name:
+                    method[0] = 'new'
+                else:
+                    params = []
+                    for param in method[-3]:
+                        if param in basic_type:
+                            params.append(param)
+                        else:
+                            param_class_name, param_class_pack = get_pack_name(param)
+                            param_path = param_class_pack.get(param_class_pack).rstrip(f'/{param_class_name}.html')
+                            param_hash = f'{method}${package_project}${param_path}${param_class_pack}${param_class_name}'
+                            params.append(param_hash)
+
+                    params_hash = ','.join(params)
+                    if method[-2] not in basic_type:
+                        return_class_name, return_class_pack = get_pack_name(method[-2])
+                        return_path = package_class_dict.get(return_class_pack).rstrip(f'/{return_class_name}.html')
+                        return_hash = f'{method}${package_project}${return_path}${return_class_pack}${return_class_name}'
+                    method_hash = f'method${package_project}${package_path}${package_name}${class_name}$' \
+                                  f'{method[-1]},{method[0]}({params_hash})->{return_hash}'
+                    project_structure_dict[method_hash] = {
+                        'type': 'method',
+                        'project': package_project,
+                        'path': package_path,
+                        'package': package_name,
+                        'class': class_name,
+                        'method': method[0],
+                        'field': method[-1],
+                        'hash': method_hash
+                    }
+
+
+        def package_class_structures():
+            for package_name in package_class_dict.keys():
+                package_project = 'jdk-16.0.2_doc-all'
+                package_hash = f'package${package_project}${package_name}'
+                package_path = ''
+                project_structure_dict[package_hash] = {
+                    'type': 'package',
+                    'project': package_project,
+                    'path': package_path,
+                    'package': package_name,
+                    'contain classes': [],
+                    'hash': package_hash
+                }
+                for class_name, decs in package_class_dict.get(package_name).items():
+                    if decs[-1] == 'class':
+                        class_hash = f'class${package_project}${package_path}${package_name}${class_name}'
+                        project_structure_dict[class_hash] = {
+                            'type': 'class',
+                            'project': package_project,
+                            'path': package_path,
+                            'package': package_name,
+                            'class': class_name,
+                            'extend': '',
+                            'implement': '',
+                            'hash': class_hash
+                        }
+                    else:
+                        class_hash = f'interface${package_project}${package_path}${package_name}${class_name}'
+                        project_structure_dict[class_hash] = {
+                            'type': 'interface',
+                            'project': package_project,
+                            'path': package_path,
+                            'package': package_name,
+                            'interface': class_name,
+                            'extend': '',
+                            'hash': class_hash
+                        }
+                    project_structure_dict.get(package_hash).get('contain classes').append(class_hash)
+                    get_method(package_name, class_name, package_project, package_path)
+
+        package_class_structures()
 
 if __name__ == '__main__':
     api2desc = {}
+    package_class_dict = {}
     root_path = r'.\jdk-16.0.2_doc-all\api'
     files = [file for file in get_files(root_path) if legal_file(file)]
     for i, file in enumerate(files):
         print('{}/{}: len(api2desc)={}'.format(i+1, len(files), len(api2desc)), end='\r')
         if i>30:
-            api2desc = file_parser(file, api2desc)
+            api2desc, package_class_dict = file_parser(file, api2desc)
     class_pack_dict = get_class_pack_dict(api2desc)
     java_type = ['byte[]', 'char', 'short', 'int', 'long', 'float', 'double', 'boolean', 'void']
     for i in api2desc.values():
